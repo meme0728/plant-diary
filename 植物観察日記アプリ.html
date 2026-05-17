@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>植物観察日記アプリ — UI Design</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600;700;900&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+<style>
+  html, body { margin: 0; padding: 0; background: #f0eee9; font-family: "Noto Sans JP", -apple-system, system-ui, sans-serif; }
+  * { box-sizing: border-box; }
+  #root { width: 100vw; height: 100vh; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+
+<script type="text/babel" src="design-canvas.jsx"></script>
+<script type="text/babel" src="ios-frame.jsx"></script>
+<script type="text/babel" src="app-tokens.jsx"></script>
+<script type="text/babel" src="screens-mvp.jsx"></script>
+<script type="text/babel" src="screens-phase2.jsx"></script>
+
+<script type="text/babel">
+const W = 380, H = 820;
+
+function Phone({ children }) {
+  return (
+    <IOSDevice width={W} height={H}>
+      {children}
+    </IOSDevice>
+  );
+}
+
+function App() {
+  return (
+    <DesignCanvas>
+      <DCSection id="mvp" title="MVP — 植物観察日記アプリ" subtitle="React Native + Expo / 5画面 — ホーム · 登録 · 記録入力 · 記録詳細 · カレンダー">
+        <DCArtboard id="s01" label="S01 · ホーム" width={W} height={H}>
+          <Phone><S01_Home /></Phone>
+        </DCArtboard>
+        <DCArtboard id="s02" label="S02 · 植物登録" width={W} height={H}>
+          <Phone><S02_Register /></Phone>
+        </DCArtboard>
+        <DCArtboard id="s03" label="S03 · 記録入力" width={W} height={H}>
+          <Phone><S03_Record /></Phone>
+        </DCArtboard>
+        <DCArtboard id="s04" label="S04 · 記録詳細" width={W} height={H}>
+          <Phone><S04_Detail /></Phone>
+        </DCArtboard>
+        <DCArtboard id="s05" label="S05 · カレンダー" width={W} height={H}>
+          <Phone><S05_Calendar /></Phone>
+        </DCArtboard>
+      </DCSection>
+
+      <DCSection id="phase2" title="Phase 2 — MVP後の追加機能" subtitle="S06 成長グラフ · S07 タイムライン · S08 バッジ · S09 設定">
+        <DCArtboard id="s06" label="S06 · 成長グラフ" width={W} height={H}>
+          <Phone><S06_Graph /></Phone>
+        </DCArtboard>
+        <DCArtboard id="s07" label="S07 · タイムライン" width={W} height={H}>
+          <Phone><S07_Timeline /></Phone>
+        </DCArtboard>
+        <DCArtboard id="s08" label="S08 · バッジ" width={W} height={H}>
+          <Phone><S08_Badges /></Phone>
+        </DCArtboard>
+        <DCArtboard id="s09" label="S09 · 設定" width={W} height={H}>
+          <Phone><S09_Settings /></Phone>
+        </DCArtboard>
+      </DCSection>
+    </DesignCanvas>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>
