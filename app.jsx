@@ -132,6 +132,10 @@ function checkAndUnlockBadges(allEntries) {
   if (allEntries.length >= 100 && DB.badges.unlock('hundred_records')) {
     newlyUnlocked.push('🏆 観察マスターバッジ獲得！');
   }
+  const totalPhotos = allEntries.reduce((sum, e) => sum + (e.photos?.length || 0), 0);
+  if (totalPhotos >= 30 && DB.badges.unlock('photo_collector')) {
+    newlyUnlocked.push('📷 写真コレクターバッジ獲得！');
+  }
   const plantIds = [...new Set(allEntries.map(e => e.plantId))];
   plantIds.forEach(pid => {
     const streak = computeStreak(pid, allEntries);
@@ -146,6 +150,52 @@ function checkAndUnlockBadges(allEntries) {
     }
   });
   return newlyUnlocked;
+}
+
+// ─────────────────────────────────────────────────────────────
+// BADGE DEFINITIONS & HELPERS
+// ─────────────────────────────────────────────────────────────
+const BADGE_DEFS = [
+  { type: 'first_record',    label: 'はじめての観察', emoji: '🌱', color: '#4CAF50', max: 1 },
+  { type: 'streak3',         label: '3日連続',         emoji: '🔥', color: '#F57C00', max: 3 },
+  { type: 'streak7',         label: '1週間連続',       emoji: '⭐', color: '#F9A825', max: 7 },
+  { type: 'streak30',        label: '1ヶ月連続',       emoji: '🏆', color: '#FF8F00', max: 30 },
+  { type: 'photo_collector', label: '写真コレクター', emoji: '📷', color: '#6B8AC4', max: 30 },
+  { type: 'ten_records',     label: '10回記録',        emoji: '📖', color: '#8BC34A', max: 10 },
+  { type: 'hundred_records', label: '観察マスター',   emoji: '🌟', color: '#2E7D32', max: 100 },
+  { type: 'graph_viewed',    label: '成長の記録者',   emoji: '📈', color: '#2E7D32', max: 1 },
+];
+
+function isBadgeUnlocked(type, allBadges) {
+  if (['streak3','streak7','streak30'].includes(type))
+    return allBadges.some(b => b.type.startsWith(type + '_'));
+  return allBadges.some(b => b.type === type);
+}
+
+function getBadgeDate(type, allBadges) {
+  const b = ['streak3','streak7','streak30'].includes(type)
+    ? allBadges.find(b => b.type.startsWith(type + '_'))
+    : allBadges.find(b => b.type === type);
+  return b?.unlockedAt;
+}
+
+function maxStreak(entries, plants) {
+  if (!plants.length) return 0;
+  return Math.max(0, ...plants.map(p => computeStreak(p.id, entries)));
+}
+
+function getBadgeProgress(type, entries, plants, allBadges) {
+  switch (type) {
+    case 'first_record':    return { cur: Math.min(entries.length, 1),                    max: 1 };
+    case 'streak3':         return { cur: Math.min(maxStreak(entries, plants), 3),         max: 3 };
+    case 'streak7':         return { cur: Math.min(maxStreak(entries, plants), 7),         max: 7 };
+    case 'streak30':        return { cur: Math.min(maxStreak(entries, plants), 30),        max: 30 };
+    case 'photo_collector': return { cur: entries.reduce((s,e) => s+(e.photos?.length||0), 0), max: 30 };
+    case 'ten_records':     return { cur: Math.min(entries.length, 10),                   max: 10 };
+    case 'hundred_records': return { cur: Math.min(entries.length, 100),                  max: 100 };
+    case 'graph_viewed':    return { cur: isBadgeUnlocked('graph_viewed', allBadges) ? 1 : 0, max: 1 };
+    default:                return { cur: 0, max: 1 };
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -344,6 +394,99 @@ const inputStyle = {
   width: '100%', border: 'none', outline: 'none', background: 'transparent',
   fontSize: 15, color: APP.text, fontFamily: JP, fontWeight: 500,
 };
+
+// ─────────────────────────────────────────────────────────────
+// LINE CHART — pure SVG, no external library
+// ─────────────────────────────────────────────────────────────
+function LineChart({ data, unit = '', color = APP.primary }) {
+  if (!data || data.length === 0) return null;
+
+  const W = 320, H = 180;
+  const PAD = { l: 38, r: 10, t: 20, b: 26 };
+  const iW = W - PAD.l - PAD.r;
+  const iH = H - PAD.t - PAD.b;
+
+  const values = data.map(d => parseFloat(d.value));
+  const minV = Math.min(...values);
+  const maxV = Math.max(...values);
+  const range = maxV - minV || 1;
+
+  const xOf = i => PAD.l + (data.length > 1 ? (i / (data.length - 1)) * iW : iW / 2);
+  const yOf = v => PAD.t + iH - ((parseFloat(v) - minV) / range) * iH;
+
+  const pts = data.map((d, i) => `${xOf(i)},${yOf(d.value)}`).join(' ');
+  const fill = [
+    `M ${xOf(0)},${PAD.t + iH}`,
+    ...data.map((d, i) => `L ${xOf(i)},${yOf(d.value)}`),
+    `L ${xOf(data.length - 1)},${PAD.t + iH} Z`,
+  ].join(' ');
+
+  // Y-axis: 4 grid levels
+  const yLevels = [0, 0.33, 0.67, 1].map(pct => ({
+    v: minV + range * pct,
+    y: PAD.t + iH * (1 - pct),
+  }));
+
+  // X-axis: show up to 5 labels evenly
+  const xStep = Math.max(1, Math.ceil(data.length / 5));
+  const xLabels = data.map((d, i) => ({ d, i })).filter(({ i }) => i % xStep === 0 || i === data.length - 1);
+
+  const lastIdx = data.length - 1;
+  const lastV = parseFloat(data[lastIdx].value);
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} style={{ width: '100%', height: 'auto', display: 'block' }}>
+      <defs>
+        <linearGradient id="chartFill" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={color} stopOpacity="0.32" />
+          <stop offset="100%" stopColor={color} stopOpacity="0.0" />
+        </linearGradient>
+      </defs>
+
+      {yLevels.map((l, i) => (
+        <g key={i}>
+          <line x1={PAD.l} y1={l.y} x2={W - PAD.r} y2={l.y}
+            stroke="rgba(0,0,0,0.07)" strokeWidth="1" />
+          <text x={PAD.l - 4} y={l.y + 3.5} textAnchor="end"
+            fontSize="9" fill="#9E9E9E" fontFamily="sans-serif">
+            {Number.isInteger(l.v) ? l.v : l.v.toFixed(1)}
+          </text>
+        </g>
+      ))}
+
+      <path d={fill} fill="url(#chartFill)" />
+      <polyline points={pts} fill="none" stroke={color} strokeWidth="2"
+        strokeLinejoin="round" strokeLinecap="round" />
+
+      {data.map((d, i) => {
+        const isLast = i === lastIdx;
+        if (i % 2 !== 0 && !isLast) return null;
+        return (
+          <circle key={i} cx={xOf(i)} cy={yOf(d.value)}
+            r={isLast ? 5 : 3}
+            fill={isLast ? color : '#fff'}
+            stroke={color}
+            strokeWidth={isLast ? 0 : 2} />
+        );
+      })}
+
+      {data.length > 0 && (
+        <text x={xOf(lastIdx)} y={yOf(lastV) - 8}
+          textAnchor="middle" fontSize="10" fontWeight="700" fill={color}
+          fontFamily="sans-serif">
+          {lastV}{unit}
+        </text>
+      )}
+
+      {xLabels.map(({ d, i }) => (
+        <text key={i} x={xOf(i)} y={H - 4}
+          textAnchor="middle" fontSize="9" fill="#9E9E9E" fontFamily="sans-serif">
+          {d.date.slice(5).replace('-', '/')}
+        </text>
+      ))}
+    </svg>
+  );
+}
 
 function StubScreen({ title, icon, tabId }) {
   return (
@@ -1463,6 +1606,567 @@ function S05_Calendar() {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// S06 — GROWTH GRAPH SCREEN
+// ═══════════════════════════════════════════════════════════════
+function S06_Graph() {
+  const { state, dispatch, refresh } = useApp();
+  const { plants, entries } = state;
+
+  const initPlantId = state.params.plantId || plants[0]?.id;
+  const [plantId, setPlantId] = React.useState(initPlantId);
+  const [period, setPeriod] = React.useState('all');
+
+  const plant = plants.find(p => p.id === plantId);
+  const templateItems = TEMPLATES[plant?.template]?.items || [];
+  const graphableItems = templateItems.filter(item => item.type === 'number' || item.type === 'integer');
+
+  const [selectedMetric, setSelectedMetric] = React.useState(graphableItems[0]?.key || '');
+
+  // Unlock "成長の記録者" badge on first visit
+  React.useEffect(() => {
+    if (DB.badges.unlock('graph_viewed')) refresh();
+  }, []);
+
+  // Keep selectedMetric valid when plant changes
+  React.useEffect(() => {
+    const items = TEMPLATES[plant?.template]?.items || [];
+    const gItems = items.filter(i => i.type === 'number' || i.type === 'integer');
+    if (gItems.length > 0 && !gItems.find(i => i.key === selectedMetric)) {
+      setSelectedMetric(gItems[0].key);
+    }
+  }, [plantId]);
+
+  // Filter entries by period
+  const periodDays = { '1m': 30, '3m': 90, 'all': Infinity };
+  const cutoff = period === 'all' ? '' : (() => {
+    const d = new Date();
+    d.setDate(d.getDate() - periodDays[period]);
+    return d.toISOString().slice(0, 10);
+  })();
+
+  const plantEntries = DB.entries.getByPlant(plantId);
+  const filteredEntries = plantEntries
+    .filter(e => !cutoff || e.date >= cutoff)
+    .filter(e => e.observations?.[selectedMetric] !== undefined && e.observations[selectedMetric] !== '')
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  const chartData = filteredEntries.map(e => ({
+    date: e.date,
+    value: parseFloat(e.observations[selectedMetric]) || 0,
+  }));
+
+  const selectedItem = graphableItems.find(i => i.key === selectedMetric);
+  const latestValue = chartData.length > 0 ? chartData[chartData.length - 1].value : null;
+  const firstValue = chartData.length > 0 ? chartData[0].value : null;
+  const delta = latestValue !== null && firstValue !== null ? latestValue - firstValue : null;
+
+  return (
+    <div style={{ background: APP.bg, minHeight: '100dvh', fontFamily: JP }}>
+      <AppHeader
+        title="成長グラフ"
+        leading={
+          <div onClick={() => dispatch({ type: 'GO_BACK' })}
+            style={{ color: APP.text2, cursor: 'pointer', padding: '4px' }}>
+            {I.chevL}
+          </div>
+        }
+      />
+
+      {/* Plant selector */}
+      {plants.length > 1 && (
+        <div style={{ display: 'flex', gap: 8, padding: '0 20px 12px', overflowX: 'auto' }}>
+          {plants.map(p => (
+            <div key={p.id}
+              onClick={() => setPlantId(p.id)}
+              style={{
+                padding: '7px 14px', borderRadius: 999, fontSize: 13, fontWeight: 600, flexShrink: 0,
+                background: plantId === p.id ? APP.primary : APP.surface,
+                color: plantId === p.id ? '#fff' : APP.text2,
+                border: plantId === p.id ? 'none' : `1px solid ${APP.border}`,
+                cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+              }}>
+              {p.name}
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div style={{ padding: '0 20px', paddingBottom: 100 }}>
+        {/* Metric tabs */}
+        {graphableItems.length > 0 ? (
+          <>
+            <div style={{
+              display: 'flex', gap: 6, padding: '8px', borderRadius: 14,
+              background: '#EFEDE6', marginBottom: 16, overflowX: 'auto',
+            }}>
+              {graphableItems.map(item => {
+                const on = selectedMetric === item.key;
+                return (
+                  <div key={item.key}
+                    onClick={() => setSelectedMetric(item.key)}
+                    style={{
+                      padding: '8px 14px', borderRadius: 10, fontSize: 13, fontWeight: 600,
+                      background: on ? '#fff' : 'transparent',
+                      color: on ? APP.text : APP.text2,
+                      boxShadow: on ? '0 1px 4px rgba(0,0,0,0.08)' : 'none',
+                      cursor: 'pointer', flexShrink: 0,
+                      WebkitTapHighlightColor: 'transparent',
+                    }}>
+                    {item.label}
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Current value card */}
+            {latestValue !== null && (
+              <Card style={{ padding: 16, marginBottom: 16 }}>
+                <div style={{ display: 'flex', alignItems: 'flex-end', gap: 10, flexWrap: 'wrap' }}>
+                  <div>
+                    <div style={{ fontSize: 11, color: APP.text2, marginBottom: 4 }}>最新の{selectedItem?.label}</div>
+                    <div style={{
+                      fontSize: 36, fontWeight: 700, color: APP.primary,
+                      fontFamily: MONO, lineHeight: 1,
+                    }}>
+                      {latestValue}<span style={{ fontSize: 16, marginLeft: 4, color: APP.text2 }}>{selectedItem?.unit}</span>
+                    </div>
+                  </div>
+                  {delta !== null && delta !== 0 && (
+                    <Pill color={delta >= 0 ? APP.primary : '#FF5252'}
+                      bg={(delta >= 0 ? APP.primary : '#FF5252') + '18'}>
+                      {delta >= 0 ? '↑' : '↓'} 合計{Math.abs(delta).toFixed(1)}{selectedItem?.unit}
+                    </Pill>
+                  )}
+                </div>
+                <div style={{ fontSize: 12, color: APP.text3, marginTop: 6 }}>
+                  {chartData.length}件のデータ
+                </div>
+              </Card>
+            )}
+
+            {/* Chart */}
+            <Card style={{ padding: 12, marginBottom: 14 }}>
+              {chartData.length >= 2 ? (
+                <LineChart data={chartData} unit={selectedItem?.unit || ''} color={APP.primary} />
+              ) : chartData.length === 1 ? (
+                <div style={{ padding: '20px 0', textAlign: 'center', color: APP.text2, fontSize: 13 }}>
+                  データが2件以上あるとグラフが表示されます
+                </div>
+              ) : (
+                <div style={{ padding: '20px 0', textAlign: 'center', color: APP.text3, fontSize: 13 }}>
+                  この期間に{selectedItem?.label}の記録がありません
+                </div>
+              )}
+            </Card>
+
+            {/* Period filter */}
+            <div style={{ display: 'flex', gap: 8, marginBottom: 20 }}>
+              {[['1m','1ヶ月'], ['3m','3ヶ月'], ['all','全期間']].map(([v, label]) => {
+                const on = period === v;
+                return (
+                  <div key={v} onClick={() => setPeriod(v)} style={{
+                    flex: 1, padding: '10px 0', borderRadius: 12, textAlign: 'center',
+                    fontSize: 13, fontWeight: 600,
+                    background: on ? APP.primary : APP.surface,
+                    color: on ? '#fff' : APP.text2,
+                    border: on ? 'none' : `1px solid ${APP.border}`,
+                    cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+                  }}>{label}</div>
+                );
+              })}
+            </div>
+
+            {/* Timeline link */}
+            <div
+              onClick={() => dispatch({ type: 'NAVIGATE', screen: 'timeline', params: { plantId } })}
+              style={{
+                display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                padding: '14px 16px', borderRadius: 14,
+                background: APP.surface, border: `1px solid ${APP.border}`,
+                cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
+              }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{ fontSize: 20 }}>🎬</span>
+                <div>
+                  <div style={{ fontSize: 14, fontWeight: 600, color: APP.text }}>成長タイムライン</div>
+                  <div style={{ fontSize: 12, color: APP.text2 }}>写真で振り返る</div>
+                </div>
+              </div>
+              <div style={{ color: APP.text3 }}>{I.chev}</div>
+            </div>
+          </>
+        ) : (
+          <div style={{
+            textAlign: 'center', padding: '60px 20px', color: APP.text3,
+          }}>
+            <div style={{ fontSize: 40, marginBottom: 12 }}>📊</div>
+            <div style={{ fontSize: 15, fontWeight: 600, color: APP.text2, marginBottom: 8 }}>
+              グラフ対応の記録がありません
+            </div>
+            <div style={{ fontSize: 13, lineHeight: 1.6 }}>
+              草丈などの数値を記録すると<br/>ここにグラフが表示されます
+            </div>
+          </div>
+        )}
+      </div>
+
+      <NavTabBar active="graph" />
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// S07 — PHOTO TIMELINE SCREEN
+// ═══════════════════════════════════════════════════════════════
+function S07_Timeline() {
+  const { state, dispatch } = useApp();
+  const { plants } = state;
+  const plantId = state.params.plantId || plants[0]?.id;
+
+  const plant = plants.find(p => p.id === plantId);
+  const allEntries = DB.entries.getByPlant(plantId);
+  const photoEntries = allEntries
+    .filter(e => e.photos?.length > 0)
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  const [currentIdx, setCurrentIdx] = React.useState(
+    Math.max(0, photoEntries.length - 1)
+  );
+  const thumbsRef = React.useRef(null);
+  const touchStartX = React.useRef(null);
+
+  const current = photoEntries[currentIdx];
+
+  // Auto-scroll thumbnail strip to active item
+  React.useEffect(() => {
+    const el = thumbsRef.current?.children[currentIdx];
+    if (el) el.scrollIntoView({ inline: 'center', behavior: 'smooth', block: 'nearest' });
+  }, [currentIdx]);
+
+  const handleTouchStart = e => { touchStartX.current = e.touches[0].clientX; };
+  const handleTouchEnd = e => {
+    if (touchStartX.current === null) return;
+    const diff = touchStartX.current - e.changedTouches[0].clientX;
+    if (Math.abs(diff) > 40) {
+      if (diff > 0) setCurrentIdx(i => Math.min(i + 1, photoEntries.length - 1));
+      else setCurrentIdx(i => Math.max(i - 1, 0));
+    }
+    touchStartX.current = null;
+  };
+
+  // Get first numeric observation for overlay
+  const templateItems = TEMPLATES[plant?.template]?.items || [];
+  const firstNumericKey = templateItems.find(i => i.type === 'number' || i.type === 'integer');
+
+  const DARK = '#1A1A1A';
+  const DARK2 = 'rgba(255,255,255,0.6)';
+
+  if (!plant) {
+    return (
+      <div style={{ background: DARK, minHeight: '100dvh', display: 'flex',
+        alignItems: 'center', justifyContent: 'center', color: DARK2, fontFamily: JP }}>
+        植物が見つかりません
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ background: DARK, minHeight: '100dvh', fontFamily: JP }}>
+      {/* Header — dark theme */}
+      <div style={{
+        paddingTop: 54, paddingBottom: 10, paddingLeft: 20, paddingRight: 20,
+        position: 'sticky', top: 0, zIndex: 10, background: DARK,
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', minHeight: 36 }}>
+          <div onClick={() => dispatch({ type: 'GO_BACK' })}
+            style={{ color: 'rgba(255,255,255,0.7)', cursor: 'pointer', padding: '4px' }}>
+            {I.close}
+          </div>
+          <div style={{ color: '#fff', fontWeight: 600, fontSize: 15 }}>
+            {plant.name} · {photoEntries.length}枚
+          </div>
+          <div style={{ width: 28 }} />
+        </div>
+      </div>
+
+      {photoEntries.length === 0 ? (
+        <div style={{
+          display: 'flex', flexDirection: 'column', alignItems: 'center',
+          justifyContent: 'center', padding: '80px 40px', gap: 12,
+        }}>
+          <div style={{ fontSize: 40 }}>📷</div>
+          <div style={{ fontSize: 15, fontWeight: 600, color: 'rgba(255,255,255,0.7)' }}>
+            写真付きの記録がありません
+          </div>
+          <div style={{ fontSize: 13, color: DARK2, textAlign: 'center', lineHeight: 1.6 }}>
+            記録に写真を追加すると<br/>タイムラインで成長を振り返れます
+          </div>
+        </div>
+      ) : (
+        <>
+          {/* Hero photo */}
+          <div
+            onTouchStart={handleTouchStart}
+            onTouchEnd={handleTouchEnd}
+            style={{ position: 'relative', margin: '8px 0' }}>
+            <img src={current.photos[0]} alt={`Day ${currentIdx + 1}`}
+              style={{ width: '100%', height: 320, objectFit: 'cover', display: 'block' }} />
+
+            {/* Top-left: DAY badge */}
+            <div style={{
+              position: 'absolute', top: 12, left: 12,
+              background: 'rgba(0,0,0,0.55)',
+              backdropFilter: 'blur(8px)',
+              padding: '6px 12px', borderRadius: 8,
+              color: '#fff', fontFamily: MONO, fontSize: 11, fontWeight: 700,
+              letterSpacing: 0.8,
+            }}>
+              DAY {currentIdx + 1} · {formatJaDate(current.date).replace('年','/').replace('月','/').replace(/日.*/,'')}
+            </div>
+
+            {/* Bottom-left: numeric value */}
+            {firstNumericKey && current.observations?.[firstNumericKey.key] && (
+              <div style={{
+                position: 'absolute', bottom: 12, left: 12,
+                background: 'rgba(0,0,0,0.55)',
+                backdropFilter: 'blur(8px)',
+                padding: '6px 12px', borderRadius: 8,
+                color: '#fff', fontFamily: MONO, fontSize: 13, fontWeight: 700,
+              }}>
+                {firstNumericKey.label} {current.observations[firstNumericKey.key]}{firstNumericKey.unit}
+              </div>
+            )}
+
+            {/* Navigation arrows for non-touch */}
+            {currentIdx > 0 && (
+              <div onClick={() => setCurrentIdx(i => i - 1)}
+                style={{
+                  position: 'absolute', left: 8, top: '50%', transform: 'translateY(-50%)',
+                  width: 36, height: 36, borderRadius: 18,
+                  background: 'rgba(0,0,0,0.4)', color: '#fff',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  cursor: 'pointer',
+                }}>
+                {I.chevL}
+              </div>
+            )}
+            {currentIdx < photoEntries.length - 1 && (
+              <div onClick={() => setCurrentIdx(i => i + 1)}
+                style={{
+                  position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)',
+                  width: 36, height: 36, borderRadius: 18,
+                  background: 'rgba(0,0,0,0.4)', color: '#fff',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  cursor: 'pointer',
+                }}>
+                {I.chev}
+              </div>
+            )}
+          </div>
+
+          {/* Scrubber */}
+          <div style={{ padding: '12px 20px 8px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}>
+              <div style={{ fontSize: 11, color: DARK2, fontFamily: MONO }}>DAY 1</div>
+              <div style={{ fontSize: 11, color: '#fff', fontFamily: MONO }}>
+                DAY {currentIdx + 1} / {photoEntries.length}
+              </div>
+            </div>
+            <input
+              type="range"
+              min="0"
+              max={Math.max(0, photoEntries.length - 1)}
+              value={currentIdx}
+              onChange={e => setCurrentIdx(Number(e.target.value))}
+              style={{ width: '100%', accentColor: APP.primary, cursor: 'pointer' }}
+            />
+          </div>
+
+          {/* Thumbnail strip */}
+          <div
+            ref={thumbsRef}
+            style={{
+              display: 'flex', gap: 8, padding: '4px 20px 12px',
+              overflowX: 'auto',
+            }}>
+            {photoEntries.map((entry, idx) => {
+              const isActive = idx === currentIdx;
+              return (
+                <div key={entry.id}
+                  onClick={() => setCurrentIdx(idx)}
+                  style={{
+                    flexShrink: 0, cursor: 'pointer',
+                    WebkitTapHighlightColor: 'transparent',
+                  }}>
+                  <img src={entry.photos[0]} alt={`Day ${idx + 1}`}
+                    style={{
+                      width: 60, height: 76, objectFit: 'cover', borderRadius: 8,
+                      border: isActive ? `2px solid ${APP.primary}` : '2px solid transparent',
+                      opacity: isActive ? 1 : 0.55,
+                      transition: 'opacity 0.15s',
+                    }} />
+                  <div style={{
+                    fontFamily: MONO, fontSize: 9, color: DARK2,
+                    textAlign: 'center', marginTop: 4,
+                  }}>
+                    {entry.date.slice(5).replace('-', '/')}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Memo if any */}
+          {current.memo && (
+            <div style={{ padding: '0 20px 20px' }}>
+              <div style={{
+                background: 'rgba(255,255,255,0.08)', borderRadius: 12,
+                padding: '12px 14px', fontSize: 13, color: 'rgba(255,255,255,0.8)',
+                lineHeight: 1.6,
+              }}>
+                {current.memo}
+              </div>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
+// S08 — BADGES SCREEN
+// ═══════════════════════════════════════════════════════════════
+function S08_Badges() {
+  const { state } = useApp();
+  const { plants, entries } = state;
+  const allBadges = DB.badges.getAll();
+
+  const unlockedDefs = BADGE_DEFS.filter(def => isBadgeUnlocked(def.type, allBadges));
+  const lockedDefs   = BADGE_DEFS.filter(def => !isBadgeUnlocked(def.type, allBadges));
+  const total = BADGE_DEFS.length;
+  const earned = unlockedDefs.length;
+
+  function formatBadgeDate(dateStr) {
+    if (!dateStr) return '';
+    const d = new Date(dateStr);
+    return `${d.getMonth()+1}/${d.getDate()} 獲得`;
+  }
+
+  return (
+    <div style={{ background: APP.bg, minHeight: '100dvh', fontFamily: JP }}>
+      <AppHeader title="バッジ" />
+
+      <div style={{ padding: '0 20px', paddingBottom: 100 }}>
+        {/* Progress hero */}
+        <Card style={{
+          padding: 20, marginBottom: 20,
+          background: `linear-gradient(135deg, ${APP.primaryLt}, #fff)`,
+          border: `1px solid ${APP.primary}22`,
+        }}>
+          <div style={{ textAlign: 'center' }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'center', gap: 4 }}>
+              <span style={{ fontSize: 44, fontWeight: 700, color: APP.primary }}>{earned}</span>
+              <span style={{ fontSize: 18, color: APP.text3 }}>/ {total}</span>
+            </div>
+            <div style={{ fontSize: 13, color: APP.text2, marginBottom: 12 }}>あなたの実績 · バッジを獲得</div>
+            <div style={{ height: 8, borderRadius: 4, background: '#fff', overflow: 'hidden' }}>
+              <div style={{
+                height: '100%', borderRadius: 4, background: APP.primary,
+                width: `${(earned / total) * 100}%`,
+                transition: 'width 0.4s ease-out',
+              }} />
+            </div>
+          </div>
+        </Card>
+
+        {/* Earned badges */}
+        {unlockedDefs.length > 0 && (
+          <>
+            <SectionLabel>獲得済み {earned}個</SectionLabel>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 10, marginBottom: 20 }}>
+              {unlockedDefs.map(def => {
+                const dateStr = getBadgeDate(def.type, allBadges);
+                return (
+                  <Card key={def.type} style={{ padding: 12, textAlign: 'center' }}>
+                    <div style={{
+                      width: 56, height: 56, borderRadius: 28, margin: '0 auto 8px',
+                      background: def.color + '20',
+                      border: `2px solid ${def.color}`,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: 26,
+                    }}>
+                      {def.emoji}
+                    </div>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: APP.text, lineHeight: 1.3 }}>
+                      {def.label}
+                    </div>
+                    {dateStr && (
+                      <div style={{ fontSize: 9, color: APP.text3, marginTop: 4, fontFamily: MONO }}>
+                        {formatBadgeDate(dateStr)}
+                      </div>
+                    )}
+                  </Card>
+                );
+              })}
+            </div>
+          </>
+        )}
+
+        {/* Locked / in-progress badges */}
+        {lockedDefs.length > 0 && (
+          <>
+            <SectionLabel>挑戦中 {lockedDefs.length}個</SectionLabel>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {lockedDefs.map(def => {
+                const prog = getBadgeProgress(def.type, entries, plants, allBadges);
+                const pct = prog.max > 0 ? Math.min(1, prog.cur / prog.max) : 0;
+                return (
+                  <Card key={def.type} style={{ padding: 14, display: 'flex', gap: 12, alignItems: 'center' }}>
+                    <div style={{
+                      width: 48, height: 48, borderRadius: 24, flexShrink: 0,
+                      background: '#f0f0f0',
+                      border: `1.5px dashed #ccc`,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      fontSize: 22, opacity: 0.5,
+                    }}>
+                      {def.emoji}
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 14, fontWeight: 700, color: APP.text2, marginBottom: 8 }}>
+                        {def.label}
+                      </div>
+                      <div style={{ height: 5, borderRadius: 3, background: APP.border, overflow: 'hidden', marginBottom: 4 }}>
+                        <div style={{
+                          height: '100%', borderRadius: 3, background: APP.text3,
+                          width: `${pct * 100}%`,
+                          transition: 'width 0.3s',
+                        }} />
+                      </div>
+                      <div style={{ fontSize: 10, color: APP.text3, fontFamily: MONO }}>
+                        {prog.cur} / {prog.max}
+                      </div>
+                    </div>
+                  </Card>
+                );
+              })}
+            </div>
+          </>
+        )}
+
+        {earned === total && (
+          <div style={{ textAlign: 'center', padding: '24px 0', fontSize: 13, color: APP.primary, fontWeight: 600 }}>
+            🎉 すべてのバッジを獲得しました！
+          </div>
+        )}
+      </div>
+
+      <NavTabBar active="badge" />
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════
 // APP ROUTER
 // ═══════════════════════════════════════════════════════════════
 function AppRouter() {
@@ -1474,8 +2178,9 @@ function AppRouter() {
     record:   S03_Record,
     detail:   S04_Detail,
     calendar: S05_Calendar,
-    graph:    () => <StubScreen title="成長グラフ" icon="📈" tabId="graph" />,
-    badges:   () => <StubScreen title="バッジ" icon="🏅" tabId="badge" />,
+    graph:    S06_Graph,
+    timeline: S07_Timeline,
+    badges:   S08_Badges,
     settings: () => <StubScreen title="設定" icon="⚙️" tabId="set" />,
   };
 
