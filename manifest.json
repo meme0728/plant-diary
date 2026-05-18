@@ -1,0 +1,24 @@
+{
+  "name": "植物観察日記",
+  "short_name": "植物日記",
+  "description": "植物の成長を毎日記録する観察日記アプリ",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#FAFAF6",
+  "theme_color": "#4CAF50",
+  "orientation": "portrait",
+  "lang": "ja",
+  "icons": [
+    {
+      "src": "icon-192.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml"
+    },
+    {
+      "src": "icon-512.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
