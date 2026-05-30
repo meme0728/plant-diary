@@ -1,4 +1,4 @@
-const CACHE = 'plant-diary-v1';
+const CACHE = 'plant-diary-v2';
 const SHELL = [
   './index.html',
   './app-tokens.jsx',
